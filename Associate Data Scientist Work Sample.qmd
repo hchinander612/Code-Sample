@@ -1,0 +1,177 @@
+---
+title: "Associate Data Scientist Work Sample"
+author: "Haley Chinander"
+format: html
+editor: visual
+---
+
+```{r, include = FALSE}
+
+#Load necessary packages:
+
+library(tidyverse)
+library(zoo)
+library(ipumsr)
+library(ggplot2)
+library(tinytex)
+
+# Set working directory:
+
+setwd("J:/RES-PA/Paffairs/Outreach Director Work/RO Database/RO Code + Data/HMC Code/Code sample")
+
+```
+
+## Task Instructions
+
+In the Associate Data Scientist role, you would encounter a variety of common labor market statistics. Here are a few:
+
+-   The employment to population ratio is calculated by dividing the number of employed individuals in the population of interest by the number of total people in the population of interest.
+
+-   The unemployment rate is calculated by dividing the number of unemployed individuals in the population of interest by the number of people in the labor force in the population of interest.
+
+-   The labor force participation rate is calculated by dividing the number of individuals in the labor force in the population of interest by the number of total people in the population of interest. To be in the labor force, an individual has to either be employed or unemployed.
+
+## Pre-process data:
+
+I have downloaded an extract from IPUMS CPS of the 2023 Basic Monthly data. Below are the steps for reading in the data and previewing the contents:
+
+```{r, message=FALSE}
+
+# Read in the data: 
+
+ddi <- read_ipums_ddi("cps_00072.xml") 
+
+cps_raw <- read_ipums_micro(ddi)
+
+#Pre-process data for easier analysis:
+
+cps_data <- cps_raw %>% 
+  mutate(DAY = "01") %>% #The CPS only has month and year, to create a date, first add a "DAY" variable
+  mutate(DATE = make_date(year = YEAR, month = MONTH, day = DAY)) %>% #Create a "DATE" variable
+  select(DATE,WTFINL,LABFORCE,EMPSTAT,AGE,SEX,RACE,HISPAN)%>% #Select necessary variables
+  mutate(EMP = case_when(EMPSTAT %in% c(10:12)~1, EMPSTAT %in% c(21:22) ~ 2, TRUE ~ 0)) %>% #Simplify emp categories
+  mutate(SEX = as.numeric(SEX)) %>% #Convert variables to numeric that will be recoded
+  mutate(RACE =as.numeric(RACE))
+
+```
+
+The pre-processing steps above will help make the data easier to analyze in the tasks that follow. I created a date variable that will allow for months to be plotted on a chart. I made sure to convert two of the variables (SEX and RACE) to the numeric class since I will eventually recode and/or mutate these variables. I also created a new variable called EMP that combines values from the EMPSTAT variable into the following categories:
+
+| EMP value | Definition |                                                                      Original values |
+|-------------------|:----------------------|-----------------------------:|
+| 1         | Employed   |                EMPSTAT = 10 (at work), EMPSTAT = 12 (Has job, not at work last week) |
+| 2         | Unemployed | EMPSTAT = 21 (unemployed, experienced worker), EMPSTAT = 22 (unemployed, new worker) |
+
+## Task One - Employment to Population Ratio
+
+Calculate the monthly employment to population ratio for prime-age (25–54-year-old) workers for all months in 2023.
+
+```{r, message=FALSE}
+
+cps_epr <- cps_data %>% filter(AGE %in% c(25:54)) %>% #Filter the data to include prime-age workers
+  group_by(DATE,EMP)%>% #Group by employment status and date
+  summarise(wt_count = sum(WTFINL))%>% #Apply final basic weight 
+  mutate(pct = wt_count/sum(wt_count))%>% #Calculate share of employed respondents out of total population
+  filter(EMP == 1) #Filter to only include employed respondents 
+
+```
+
+Visualize the data:
+
+```{r}
+
+plot_epr <- cps_epr %>% ggplot(aes(x=DATE, y=pct))+
+  geom_line(linewidth = 1.25)+
+  labs(
+    title = "U.S. Monthly Employment to Population Ratio, 2023",
+    subtitle = "Percent of prime-age population, ages 25 to 54",
+    y="Percent",
+    x = "Month",
+    caption = "Source: Author's calculations, IPUMS CPS, University of Minnesota") +
+  scale_y_continuous(limits = c(.785,.825), labels = scales::percent)+
+  scale_x_date(date_labels = "%b",
+               date_breaks = "1 month")+
+  theme_minimal()
+
+plot_epr
+
+```
+
+## Task Two - Monthly Unemployment Rate
+
+Calculate the monthly unemployment rate for prime-age male and prime-age female workers (separately) for all months in 2023.
+
+```{r, message=FALSE}
+
+cps_unemp <- cps_data %>% filter(AGE %in% c(25:54)) %>% #Filter the data to include only prime-age workers
+  filter(LABFORCE == 2) %>% #Include only those in the labor force
+  group_by(DATE,SEX,EMP)%>% #Group by sex, employment status, and date
+  summarise(wt_count = sum(WTFINL))%>% #Apply final basic weight 
+  mutate(pct = wt_count/sum(wt_count)) %>% #Calculate share of unemployed respondents by sex and month
+  filter(EMP == 2) %>% #Filter to only include unemployed respondents 
+  mutate(SEX = recode(SEX, `1` = "Male", `2`="Female"))
+
+```
+
+Visualize the data:
+
+```{r}
+
+plot_unemp <- cps_unemp %>% ggplot(aes(x=DATE, y=pct, color = SEX))+
+  geom_line(linewidth = 1.25)+
+  labs(
+    title = "U.S. Monthly Unemployment Rate by Sex, 2023",
+    subtitle = "Percent of prime-age labor force, ages 25 to 54",
+    y="Percent",
+    x = "Month",
+    color = "Sex",
+    caption = "Source: Author's calculations, IPUMS CPS, University of Minnesota") +
+  scale_y_continuous(limits = c(0,.05), labels = scales::percent)+
+  scale_x_date(date_labels = "%b",
+               date_breaks = "1 month")+
+  theme_minimal()
+
+plot_unemp
+
+```
+
+## Task Three - Labor Force Participation Rate
+
+Calculate the monthly labor force participation rate for prime-age members of each racial group (separately) in the data for all months in 2023. I am choosing not to include Hispanic workers in this analysis given it is an ethnicity rather than a race.
+
+```{r,message=FALSE}
+
+cps_lfpr <- cps_data %>% filter(AGE %in% c(25:54)) %>% #Filter the data to include only prime-age workers
+  mutate(RACE = case_when(RACE == 100 ~ "White",
+                              RACE == 200 ~ "Black",
+                              RACE == 300 ~"American Indian or Alaska Native",
+                              RACE %in%c(651:652) ~ "Asian or Pacific Islander",
+                              RACE %in% c(801:830)~"Two or more races"))%>% 
+  group_by(DATE,RACE,LABFORCE) %>%#Group by date, race, labor force status
+  summarise(wt_count = sum(WTFINL))%>% #Apply final basic weight 
+  mutate(pct = wt_count/sum(wt_count)) %>%
+  filter(LABFORCE == 2) #Filter to only include respondents in the labor force
+
+```
+
+Visualize the data:
+
+```{r}
+
+plot_lfpr <- cps_lfpr %>% ggplot(aes(x=DATE, y=pct, color =RACE))+
+  geom_line(linewidth = 1.25)+
+  labs(
+    title = "U.S. Monthly Labor Force Participation Rate by Race, 2023",
+    subtitle = "Percent in prime-age labor force, ages 25 to 54",
+    y="Percent",
+    x = "Month",
+    color = "Race",
+    caption = "Source: Author's calculations, IPUMS CPS, University of Minnesota")+
+  scale_y_continuous(limits = c(.70,.90), labels = scales::percent)+
+  scale_x_date(date_labels = "%b",
+               date_breaks = "1 month")+
+  theme_minimal()
+
+plot_lfpr
+
+```
